@@ -1,0 +1,352 @@
+---
+title: 'A/B Testing Analytics: Mighty Hive Project'
+author: "Vishal Punjabi"
+date: "March 17, 2016"
+output: html_document
+section: ISM6137.902S16
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+Presentation: https://docs.google.com/presentation/d/16YXVDhucWMn4iBdxvkQn-cq58IrzjR7jX4jl0qjZxOA/pub?start=false&loop=false&delayms=3000
+
+```{r initial, include=FALSE}
+#Load Data
+abandoned_data = read.csv('Abandoned_Data_Seed.csv',header = TRUE, stringsAsFactors = FALSE)
+reservation_data = read.csv('Reservation_Data_Seed.csv',header = TRUE, stringsAsFactors = FALSE)
+```
+>I. The Business Problem
+
+*ABD contains data for all the customers in the dataset that were already pursued (advertised) but ended up not buying a vacation package.* 
+
+*Business Problem: Should we retarget those customers?*
+
+
+**Q1: In light of your experience as a business woman/man, argue why this is a sensible business question.**
+
+It takes no harm to retarget the abondoned customers to understand why they did not buy the vacation package in the first attempt even after calling the agency.
+
+A customer may not always buy the product in the first attempt because 1) He might more time to buy 2) He might consider other alternatives, compare them and then decide. 3) He might be interested to buy the product in future.
+
+Also, even though these customers did not buy it this time, they might be interested in future, hence retargeting them might help for the next time.
+
+However, a thourough analysis would be good to carry out between the ones those bought the package and the ones who turned down before we can retarget.
+
+
+*An experiment is run, where customers in the abandoned dataset are randomly placed in a treatment or in a control group (see column L in both files). Those marked as "test" are retargeted (treated), the others marked as control are part of the control group.*
+
+**Q2: Compute the summary statistics (mean, median, q5, q95, standard deviation) of the Test_variable: a dummy with a value of 1 if tested 0 if control in the ABD database.**
+
+```{r test summary}
+abandoned_data$Test  <- NA
+abandoned_data$Test[abandoned_data$Test_Control == "test"] <- 1
+abandoned_data$Test[abandoned_data$Test_Control == "control"] <- 0
+
+summary(abandoned_data$Test)
+```
+
+Standard Deviation  = `r sd(abandoned_data$Test)`  
+q5 = `r quantile(abandoned_data$Test,0.05)`  
+q95 = `r quantile(abandoned_data$Test,0.95)`  
+
+**Q3: Compute the same summary statistics for this Test_variable by blocking on States, wherever this information is available.**
+
+```{r states summary}
+abandoned_data$Has_State <- 0
+abandoned_data$Has_State[abandoned_data$Address != ""] <- 1
+
+summary(abandoned_data$Test[abandoned_data$Has_State == 1])
+```
+
+Standard Deviation  = `r sd(abandoned_data$Test[abandoned_data$Has_State == 1])`  
+q5 = `r quantile(abandoned_data$Test[abandoned_data$Has_State == 1],0.05)`  
+q95 = `r quantile(abandoned_data$Test[abandoned_data$Has_State == 1],0.95)`  
+
+**Q4:  In light of the summaries in Q3, Q4 does the experiment appear to be executed properly? Any imbalance in the assignments to treatment and control when switching to the State level? What would you have done differently?**
+
+The mean and the standard deviation of the test variable is very near to 0.5 for in both the cases. i.e considering all samples and only State level ones. Hence there is no imbalance in the assignements to treatment and control and the experiment appear to be executed properly.
+
+
+>II. Data Matching
+
+*About three months later, the experiment/retargeting campaign is over.*
+*Customers, presented in the ABD excel file, who bought a vacation packages during the time frame, are recorded in the RS excel file.*
+
+**Q5: Argue that for proper causal inference based on experiments this is potentially problematic: 'We do not observe some 'outcomes' for some customers'.  Argue that, however, matching appropriately the ABD with the RS dataset can back out this information.**
+
+Attributes like First Name and Last Name are missing in the datasets hence it cannot be used as the only way of determining the outcomes of the test. So in order to match the datasets correctly some key attributes about the customers need to be identified and matched in both the datasets. Only then it can be said that a match is present, and the customer who was abandoned has be converted in the reservation category. 
+
+Hence robust matching of the datasets is required which can backout the information correctly.
+
+**Q6: After observing the data in the both files, argue that customers can be matched across some "data keys" (columns labels). Properly identify all these data keys (feel free to add a few clarifying examples if needed)**
+
+In order to match the ABD dataset with the RS dataset robustly, some key attributes or "data keys" need to be identified. 
+Some of these keys that can be used to uniquely identify the customer in both data sets are -      
+1) [Email Address]  
+2) [Contact Phone]    
+3) [Incoming Phone,Last Name]  
+4) [First Name, Last Name, Zip] 
+ 
+
+
+An aggregation of unique data using these 4 keys to match should be enough in identifying the customers that have been converted to buy the package successfully.
+
+**Q7: EXTREMELY CAREFULLY DESCRIBE YOUR DATA MATCHING PROCEDURE IN ORDER TO IDENTIFY: (1) Customers in the TREATMENT group who bought (2) Customers in the TREATMENT group who did not buy (3) Customers in the Control group who bought, and (4) Customers in the Control group who did not buy. Be as precise as possible.**
+
+```{r match}
+abandoned_data[abandoned_data == ""] <- NA
+reservation_data[reservation_data == ""] <- NA
+
+#Email Matches
+Email_Matches_Abandoned <- ifelse(!is.na(abandoned_data$Email),abandoned_data$Email %in% reservation_data$Email,FALSE)
+
+#Contact Phone Matches
+ContactPhone_Matches_Abandoned <- ifelse(!is.na(abandoned_data$Contact_Phone),abandoned_data$Contact_Phone %in% reservation_data$Contact_Phone,FALSE)
+
+#Last Name, Incoming Phone Matches
+LastName_Incoming_Matches_Abandoned <- ifelse(!is.na(abandoned_data$Last_Name) & !is.na(abandoned_data$Incoming_Phone),paste0(abandoned_data$Last_Name,abandoned_data$Incoming_Phone) %in% paste0(reservation_data$Last_Name,reservation_data$Incoming_Phone),FALSE)
+
+#First Name, Last Name, Zip Matches
+Names_Zip_Matches_Abandoned <- ifelse((!is.na(abandoned_data$First_Name) & !is.na(abandoned_data$Last_Name)) & !is.na(abandoned_data$Zipcode) ,paste0(abandoned_data$First_Name,abandoned_data$Last_Name,abandoned_data$Zipcode) %in% paste0(reservation_data$First_Name,reservation_data$Last_Name,reservation_data$Zipcode),FALSE)
+
+# Combine all Matches
+All_Matches_Abandoned = Email_Matches_Abandoned | ContactPhone_Matches_Abandoned | LastName_Incoming_Matches_Abandoned | Names_Zip_Matches_Abandoned
+abandoned_data_matches <- abandoned_data[All_Matches_Abandoned,]
+
+#Remove Duplicates based on the keys
+abandoned_data_matches <- abandoned_data_matches[!duplicated(abandoned_data_matches[,c("Email")],incomparables = NA),]
+abandoned_data_matches <- abandoned_data_matches[!duplicated(abandoned_data_matches[,c("Contact_Phone")],incomparables = NA),]
+abandoned_incoming_dup <- duplicated(abandoned_data_matches[,c("Incoming_Phone")],incomparables = NA)
+abandoned_lastname_dup <- duplicated(abandoned_data_matches[,c("Last_Name")],incomparables = NA)
+abandoned_firstname_dup <- duplicated(abandoned_data_matches[,c("First_Name")],incomparables = NA)
+abandoned_zipcode_dup <- duplicated(abandoned_data_matches[,c("Zipcode")],incomparables = NA)
+abandoned_data_matches <- abandoned_data_matches[!(abandoned_incoming_dup & abandoned_lastname_dup),]
+abandoned_data_matches <- abandoned_data_matches[!(abandoned_firstname_dup & abandoned_lastname_dup & abandoned_zipcode_dup),]
+
+# Store Outcome in original dataset
+abandoned_data$Outcome <- 0
+abandoned_data$Outcome[as.numeric(row.names(abandoned_data_matches))] <- 1
+```
+
+Detailed Data Matching Procedure :
+
+- Assign all missing values in both Abandunt and Reservation dataset as NA
+- Match the customers in both AB and RS based on Email address only
+- Match the customers in both AB and RS based on Contact Phone only
+- Match the customers in both AB and RS based on combination of Last Name and Incoming Phone 
+- Match the customers in both AB and RS based on combination of First Name, Last Name and Zip Code.
+- Combine all the customer matches in a single list.
+- Remove duplicate customers based on each of the Keys i.e. Email, Contact Phone, Last Name, Incoming Phone, First Name, Zip Code.
+- Total 223 matched customers are marked Buy = 1 in the original dataset.
+
+
+**Q8: Are there problematic cases? i.e. data records not matchable? If so, provide a few examples and toss those cases out of the analysis.**
+
+Contact Phone, Email, Incoming Phone, First Name, Last Name are the key attributes to match data between two datasets. However, there are scenarios where data was not recorded for Incoming Phone , Contact Phone & Email for some customers. In that case, matches has to be done on each key and then all customers need to be agregated.
+
+
+**Q9: Complete the following cross-tabulation:**
+
+
+**Group \ Outcome	  Buy	  No Buy**
+**Treatment	      Number	Number**
+**Control	        Number	Number**
+
+```{r cross-tab }
+library(knitr)
+treatments <- nrow(abandoned_data[abandoned_data$Test == 1,])
+controls <- nrow(abandoned_data[abandoned_data$Test == 0,])
+treatment_buy <- length(abandoned_data$Outcome[abandoned_data$Outcome == 1 & abandoned_data$Test == 1])
+treatment_nobuy <- length(abandoned_data$Outcome[abandoned_data$Outcome == 0 & abandoned_data$Test == 1])
+control_buy <- length(abandoned_data$Outcome[abandoned_data$Outcome == 1 & abandoned_data$Test == 0])
+control_nobuy <- length(abandoned_data$Outcome[abandoned_data$Outcome == 0 & abandoned_data$Test == 0])
+
+conv_rate_treatment <- treatment_buy/treatments*100
+conv_rate_control <- control_buy/controls*100
+cross_tab <- data.frame(treatment_buy,treatment_nobuy,control_buy,control_nobuy)
+kable(cross_tab)
+```
+
+Conversion Rate for Treatment Group is `r conv_rate_treatment` %.   
+Conversion Rate for Control Group is `r conv_rate_control` %.
+
+**Q10: Repeat Q9 for 5 randomly picked states. Report 5 different tables by specifying the states you "randomly picked".**
+
+State: New York
+```{r cross-tab-NY}
+#NY
+treatment_buy_NY <- length(abandoned_data$Outcome[abandoned_data$Outcome == 1 & abandoned_data$Test == 1 & abandoned_data$Address == "NY"])
+treatment_nobuy_NY <- length(abandoned_data$Outcome[abandoned_data$Outcome == 0 & abandoned_data$Test == 1 & abandoned_data$Address == "NY"])
+control_buy_NY <- length(abandoned_data$Outcome[abandoned_data$Outcome == 1 & abandoned_data$Test == 0 & abandoned_data$Address == "NY"])
+control_nobuy_NY <- length(abandoned_data$Outcome[abandoned_data$Outcome == 0 & abandoned_data$Test == 0 & abandoned_data$Address == "NY"])
+cross_tab_NY <- data.frame(treatment_buy_NY,treatment_nobuy_NY,control_buy_NY,control_nobuy_NY)
+kable(cross_tab_NY)
+```
+
+State: Ohio
+```{r cross-tab-OH}
+#OH
+treatment_buy_OH <- length(abandoned_data$Outcome[abandoned_data$Outcome == 1 & abandoned_data$Test == 1 & abandoned_data$Address == "OH"])
+treatment_nobuy_OH <- length(abandoned_data$Outcome[abandoned_data$Outcome == 0 & abandoned_data$Test == 1 & abandoned_data$Address == "OH"])
+control_buy_OH <- length(abandoned_data$Outcome[abandoned_data$Outcome == 1 & abandoned_data$Test == 0 & abandoned_data$Address == "OH"])
+control_nobuy_OH <- length(abandoned_data$Outcome[abandoned_data$Outcome == 0 & abandoned_data$Test == 0 & abandoned_data$Address == "OH"])
+cross_tab_OH <- data.frame(treatment_buy_OH,treatment_nobuy_OH,control_buy_OH,control_nobuy_OH)
+kable(cross_tab_OH)
+```
+
+State: Arizona
+```{r cross-tab-AZ}
+#AZ
+treatment_buy_AZ <- length(abandoned_data$Outcome[abandoned_data$Outcome == 1 & abandoned_data$Test == 1 & abandoned_data$Address == "AZ"])
+treatment_nobuy_AZ <- length(abandoned_data$Outcome[abandoned_data$Outcome == 0 & abandoned_data$Test == 1 & abandoned_data$Address == "AZ"])
+control_buy_AZ <- length(abandoned_data$Outcome[abandoned_data$Outcome == 1 & abandoned_data$Test == 0 & abandoned_data$Address == "AZ"])
+control_nobuy_AZ <- length(abandoned_data$Outcome[abandoned_data$Outcome == 0 & abandoned_data$Test == 0 & abandoned_data$Address == "AZ"])
+cross_tab_AZ <- data.frame(treatment_buy_AZ,treatment_nobuy_AZ,control_buy_AZ,control_nobuy_AZ)
+kable(cross_tab_AZ)
+```
+
+State: Illinois
+```{r cross-tab-IL}
+#IL
+treatment_buy_IL <- length(abandoned_data$Outcome[abandoned_data$Outcome == 1 & abandoned_data$Test == 1 & abandoned_data$Address == "IL"])
+treatment_nobuy_IL <- length(abandoned_data$Outcome[abandoned_data$Outcome == 0 & abandoned_data$Test == 1 & abandoned_data$Address == "IL"])
+control_buy_IL <- length(abandoned_data$Outcome[abandoned_data$Outcome == 1 & abandoned_data$Test == 0 & abandoned_data$Address == "IL"])
+control_nobuy_IL <- length(abandoned_data$Outcome[abandoned_data$Outcome == 0 & abandoned_data$Test == 0 & abandoned_data$Address == "IL"])
+cross_tab_IL <- data.frame(treatment_buy_IL,treatment_nobuy_IL,control_buy_IL,control_nobuy_IL)
+kable(cross_tab_IL)
+```
+
+State: California
+```{r cross-tab-CA}
+#CA
+treatment_buy_CA <- length(abandoned_data$Outcome[abandoned_data$Outcome == 1 & abandoned_data$Test == 1 & abandoned_data$Address == "CA"])
+treatment_nobuy_CA <- length(abandoned_data$Outcome[abandoned_data$Outcome == 0 & abandoned_data$Test == 1 & abandoned_data$Address == "CA"])
+control_buy_CA <- length(abandoned_data$Outcome[abandoned_data$Outcome == 1 & abandoned_data$Test == 0 & abandoned_data$Address == "CA"])
+control_nobuy_CA <- length(abandoned_data$Outcome[abandoned_data$Outcome == 0 & abandoned_data$Test == 0 & abandoned_data$Address == "CA"])
+cross_tab_CA <- data.frame(treatment_buy_CA,treatment_nobuy_CA,control_buy_CA,control_nobuy_CA)
+kable(cross_tab_CA)
+```
+
+>III. Data Cleaning
+
+*You have now identified all the customers who are relevant for the analysis and their outcome and you also know if they are in a treated or in a control  group.*
+
+*Produce an Excel File (or CSV) with the following columns*
+
+*Customer ID | Test Variable | Outcome | Days_in_Between | State |*
+
+*Where Test Variable indicates, again, the treatment or the control group, Outcome is a binary variable indicating whether a vacation package was ultimately bought, Days in between is the (largest) difference between the dates in the ABD and RS dataset (Columns B). If no purchase, set "Days_in_between" as "200".*
+
+*To be perfectly clear, you should have as number of rows all the customers you were able to match across the two data sets. Be sure to attach this excel file to the submission for proper verification.*
+
+**Produce a script (R or SQL) detailing the entire data cleaning procedure, from loading and attaching the original data file to saving the pos-processed one, for reproducibility purposes. Bonus points may be applied.**
+
+```{r new-dataset}
+#Getting the corresponding match indices in the reservation dataset
+reservation_email_matches <- match(abandoned_data_matches$Email, reservation_data$Email, nomatch = 0, incomparables = NA)
+reservation_phone_matches <- match(abandoned_data_matches$Contact_Phone, reservation_data$Contact_Phone, nomatch = 0, incomparables = NA)
+reservation_name_incoming_matches <- ifelse(!is.na(abandoned_data_matches$Last_Name) & !is.na(abandoned_data_matches$Incoming_Phone),match(paste0(abandoned_data_matches$Last_Name,abandoned_data_matches$Incoming_Phone), paste0(reservation_data$Last_Name,reservation_data$Incoming_Phone), nomatch = 0, incomparables = NA),0)
+reservation_name_zip_matches <- ifelse(!is.na(abandoned_data_matches$First_Name) & !is.na(abandoned_data_matches$Last_Name) & !is.na(abandoned_data_matches$Zipcode),match(paste0(abandoned_data_matches$First_Name,abandoned_data_matches$Last_Name,abandoned_data_matches$Zipcode), paste0(reservation_data$First_Name,reservation_data$Last_Name,reservation_data$Zipcode), nomatch = 0, incomparables = NA),0)
+reservation_all_matches <- reservation_email_matches
+reservation_all_matches <- ifelse(reservation_all_matches == 0,reservation_all_matches+reservation_phone_matches,reservation_all_matches)
+reservation_all_matches <- ifelse(reservation_all_matches == 0,reservation_all_matches+reservation_name_incoming_matches,reservation_all_matches)
+reservation_all_matches <- ifelse(reservation_all_matches == 0,reservation_all_matches+reservation_name_zip_matches,reservation_all_matches)
+abandoned_all_matches <- as.numeric(row.names(abandoned_data_matches))
+
+#Session Calculation, Days in Between
+abandoned_data$Days_in_between <- 200
+abandoned_data$Days_in_between[abandoned_data$Outcome == 1] <- as.numeric(as.Date(reservation_data$Session[reservation_all_matches],"%Y.%m.%d %H:%M:%S") - as.Date(abandoned_data$Session[abandoned_all_matches],"%Y.%m.%d %H:%M:%S")) 
+
+cleaned_abandoned_data <- data.frame(c(1:nrow(abandoned_data)),abandoned_data$Test,abandoned_data$Outcome,abandoned_data$Days_in_between,abandoned_data$Address)
+colnames(cleaned_abandoned_data) <- c("Customer_ID","Test_Variable","Outcome","Days_in_Between","State")
+
+write.csv(cleaned_abandoned_data,file = "Cleaned_Abandoned_Data_Seed.csv")
+
+```
+
+*Cleaned_Abandoned_Data_Seed.csv* has been attached with the submission for review.
+
+>IV. Statistical Analysis
+
+*We are finally in a condition to try to answer the relevant business question.*
+
+**Q11: Run a Linear regression model for**
+**Outcome = alpha + beta * Test_Variable + error**
+**And Report the output.**
+
+*Model-1:* Outcome = alpha + beta * Test Variable + error*
+```{r lm-1}
+lmodel1 <- lm(cleaned_abandoned_data$Outcome ~ cleaned_abandoned_data$Test_Variable)
+kable(summary(lmodel1)$coef, digits=3)
+```
+
+Outcome = 0.01 + 0.032 * Test_Variable + 0.002    
+Adjusted R-squared = `r summary(lmodel1)$adj.r.squared`   
+
+**Q12: Argue whether this is a properly specified linear regression model, if so, if we can draw any causal statement about the effectiveness of the retargeting campaign. Is this statistically significant?**
+
+No, This is not a properly specified linear regression model because the Test_Variable coefficient (beta) is equal to 0.03 i.e. the dependent variable "Outcome" would increase 3% for every addition of a customer in the Test group which is very less. Also the R-Sqaured value is 0.01 which is also very less to properly incorporate the variability of the dataset. We need to add more variables to get the significance out of this model.
+
+**Q13: Now add to the regression model the dummies for State and Emails. Also consider including interactions with the treatment, namely between email and retargeting. Report the outcome and comment on the results. (You can compare with Q11). You should see something interesting appearing, if possible, provide a managerial interpretation)**
+
+Adding Has_Email as a Dummy Variable in the original dataset.
+```{r lm-dummy-variable-email}
+abandoned_data$Has_Email <- 0
+abandoned_data$Has_Email[!is.na(abandoned_data$Email)] <- 1
+```
+
+*Model-2:* Outcome = alpha + beta1 * Test Variable + beta2 * Has Email * beta3 * Has_State + error*
+```{r lm-2}
+lmodel2 <- lm(cleaned_abandoned_data$Outcome ~ cleaned_abandoned_data$Test_Variable + abandoned_data$Has_Email + abandoned_data$Has_State)
+kable(summary(lmodel2)$coef, digits = 3)
+```
+
+Outcome = -0.001 + 0.031 * Test Variable + 0.048 * Has Email * 0.014 * Has_State + 0.002    
+Adjusted R-squared = `r summary(lmodel2)$adj.r.squared`
+
+The adjusted R-squared has increased to 0.023 after using the dummy variables - Has Email and Has State. Hence compared to the output from the first model, this fits better.   
+
+*Model-3:* Outcome = alpha + beta1 * Test Variable * Has Email * beta2 * Has State + error*
+```{r lm-3}
+lmodel3 <- lm(cleaned_abandoned_data$Outcome ~ cleaned_abandoned_data$Test_Variable*abandoned_data$Has_Email + abandoned_data$Has_State)
+kable(summary(lmodel3)$coef)
+```
+
+Outcome = 0.002178 + 0.023126 * Test Variable * 0.012678 * Has Email * 0.014546 * Has State + 0.066516 * Test Variable * Has Email  
+Adjusted R-squared = `r summary(lmodel3)$adj.r.squared`
+
+When interactions are included with the treatment group i.e. Test Variable and Has Email, also including the State variables, a much better adjusted R-squared is obtained.   
+
+Hence, from the managerial perspective, customers who have a recorded email address and state on file from the treatment group grouping per state have more chances of converting to a reservation category.
+
+>v. Statistical Analysis: Response Times
+
+*RQ2: You want now to investigate whether the response time (time to make a purchase after the first contact) is influenced by the retargeting campaign. Make sure you describe carefully how you compute response times (there is no clear answer, so make any sensible assumption).*
+
+**Q14: Set up an appropriate linear regression model to address the RQ2 above. Make sure to select the appropriate subset of customers. Report output analysis with your interpretation. Can the coefficients be interpreted as causal in this case? Is there evidence of any interactions effect?**
+
+*Model-4:* Outcome = alpha + beta * Days in Between * Test Variable + error
+```{r lm-4}
+lmodel4 <- lm(cleaned_abandoned_data$Outcome ~ cleaned_abandoned_data$Days_in_Between*cleaned_abandoned_data$Test_Variable)
+kable(summary(lmodel4)$coef)
+```
+
+Outcome = 1.279 + -6.395e-03 * Days in Between + 3.161e-02 * Test Variable + -1.563e-04 * Days in Between * Test Variable + 3.258e-03    
+Adjusted R-squared = `r summary(lmodel4)$adj.r.squared`
+
+As the R-squared is 0.9895, this linear regression model fits well. It can be inferred that the outcome is drastically dependent on the "Days in Between" i.e. the session time between the calls for the customer. 
+
+A negetive coefficient of Days in Between means as the Days in Between increases for each customer, the chances of Outcome being 1 reduces. Hence it is inversely proportional to outcome.
+
+** This is the best linear regression model for this dataset**
+
+**Q15: Lesson Learned. What would you have done differently in designing the experiment? Any other directions you could have taken with better data? Are there any prescriptive managerial implications out of this study? Please answer briefly**
+
+It was a good experience overall as it involved everything from data cleaning to rigorous analysis and statistical modeling and inferences.
+
+The experiment was fairly designed as matching turned out to be a challenge as there was no unique identity that could determine a customer who called. Hence if every customer is assigned a unique customer ID for every successive calls, it could be very easy in matching and understanding that the same customer has called again and has bought the package.
+
+Having a customer ID as a unique identifier for each customer for the agency, matching could have been done solely on this key reducing the time required in Data Matching and Cleaning.
+
+Managerial Implications : It can be seen that "Retargeting certainly helped". However, customers should be retargeted only in certan states and before a certain time to achieve maximum probablity of conversion. This can be understood from the last regression model. 
+
